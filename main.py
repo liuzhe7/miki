@@ -8,17 +8,31 @@ You have access to two tools:
 If a user asks you for the weather, make sure you know the location. If you can tell from the question that they mean wherever they are, use the get_user_location tool to find their location."""
 
 from dataclasses import dataclass
+from time import time
 from langchain.tools import tool, ToolRuntime
+from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain.agents import create_agent
+import os
+from dotenv import load_dotenv
+import time
+
+# 加载环境变量
+load_dotenv()
+
 
 @tool
 def get_weather_for_location(city: str) -> str:
     """Get weather for a given city."""
     return f"It's always sunny in {city}!"
 
+
 @dataclass
 class Context:
     """Custom runtime context schema."""
+
     user_id: str
+
 
 @tool
 def get_user_location(runtime: ToolRuntime[Context]) -> str:
@@ -27,9 +41,54 @@ def get_user_location(runtime: ToolRuntime[Context]) -> str:
     return "Florida" if user_id == "1" else "SF"
 
 
-def main():
-    print("Hello from miki!")
+model = ChatOpenAI(
+    base_url="https://api.moonshot.cn/v1",
+    api_key=os.getenv("KIMI_API_KEY", "sk-ka6QHF31dqHbzXm5ARk3ACohn3DgU628hTfKtu9r9wY8yotQ"), 
+    model="moonshot-v1-8k",
+    temperature=0.5,
+    timeout=10,
+    max_tokens=1000
+)
 
+
+# We use a dataclass here, but Pydantic models are also supported.
+@dataclass
+class ResponseFormat:
+    """Response schema for the agent."""
+
+    # A punny response (always required)
+    punny_response: str
+    # Any interesting information about the weather if available
+    weather_conditions: str | None = None
+
+
+checkpointer = InMemorySaver()
+
+
+def main():
+    agent = create_agent(
+        model=model,
+        system_prompt=SYSTEM_PROMPT,
+        tools=[get_user_location, get_weather_for_location],
+        context_schema=Context,
+        response_format=ResponseFormat,
+        checkpointer=checkpointer,
+    )
+
+    # `thread_id` is a unique identifier for a given conversation.
+    config = {"configurable": {"thread_id": "1"}}
+
+    response = agent.invoke(
+        {"messages": [{"role": "user", "content": "what is the weather outside?"}]},
+        config=config,
+        context=Context(user_id="1"),
+    )
+
+    print(response["structured_response"])
+    # ResponseFormat(
+    #     punny_response="Florida is still having a 'sun-derful' day! The sunshine is playing 'ray-dio' hits all day long! I'd say it's the perfect weather for some 'solar-bration'! If you were hoping for rain, I'm afraid that idea is all 'washed up' - the forecast remains 'clear-ly' brilliant!",
+    #     weather_conditions="It's always sunny in Florida!"
+    # )
 
 if __name__ == "__main__":
     main()
